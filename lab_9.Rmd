@@ -1,0 +1,178 @@
+---
+title: "lab 9"
+author: "Iris Foxfoot"
+date: "3/2/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+
+library(tidyverse)
+library(here)
+library(boot)
+library(gt)
+library(patchwork)
+library(broom)
+library(nlstools)
+library(tidyverse)
+library(dbplyr)
+```
+
+```{r}
+disp_income <- LifeCycleSavings %>% 
+  rownames_to_column() %>% 
+  arrange(dpi) %>% 
+  head(5) %>% 
+  mutate(ddpi = ddpi / 100,
+         pop15 = pop15 / 100,
+         pop75 = pop75 / 100)
+```
+
+#USING GT PACKAGE TO MAKE TABLES
+```{r}
+disp_income %>%
+  gt() %>% 
+  tab_header(
+    title = "Life cycle savings",
+    subtitle = "5 countries with lowest per capita disposable income") %>% 
+  fmt_currency(
+    columns = vars(dpi),
+    decimals = 2
+  ) %>% 
+  fmt_percent(
+    columns = vars(pop15, pop75, ddpi),
+    decimals = 1
+  ) %>% 
+  fmt_number(
+    columns = vars(sr),
+    decimals = 1
+  ) %>% 
+  tab_footnote(
+    footnote = "Data averaged from 1970 -1980",
+    location = cells_title()
+  ) %>% 
+  data_color(
+    columns = vars(dpi),
+    colors = scales::col_numeric(
+      palette = c(
+        "orange", "red", "purple"),
+      domain = c(120, 190)
+      )
+    ) %>% 
+  cols_label(
+    sr = "Savings Ratio",
+    pop15 = "Pop < 15yr",
+    pop75 = "Pop < 75",
+    dpi = "Disposable $ per capita",
+    ddpi = "Disposable percent"
+  )
+```
+
+# BOOTSTRAPPING
+
+```{r}
+hist(salinity$sal)
+mean(salinity$sal)
+t.test(salinity$sal)
+```
+
+```{r}
+mean_fun <- function (x,i) {mean(x[i])}
+
+sal_nc <- salinity$sal
+
+salboot_100 <- boot(sal_nc,
+                    statistic = mean_fun,
+                    R = 100)
+
+salboot_10k <- boot(sal_nc,
+                    statistic = mean_fun,
+                    R = 10000)
+
+salboot_100
+salboot_10k
+```
+
+```{r}
+salboot_100$t0
+salboot_100$t
+
+salboot_100_df <- data.frame(bs_mean = salboot_100$t)
+salboot_10k_df <- data.frame(bs_mean = salboot_10k$t)
+
+p1 <- ggplot(data = salinity, aes(x = sal)) +
+  geom_histogram()
+
+p2 <- ggplot(data = salboot_100_df, aes(x = bs_mean)) +
+  geom_histogram()
+
+p3 <- ggplot(data = salboot_10k_df, aes(x = bs_mean)) +
+  geom_histogram()
+
+(p1 + p2 + p3) & theme_minimal()
+```
+
+```{r}
+boot.ci(salboot_10k, conf = 0.95)
+```
+
+# NON_LINEAR LEAST SQUARES
+
+```{r}
+df <- read_csv(here("data", "log_growth.csv"))
+
+ggplot(data = df, aes(x = time, y = pop)) +
+  geom_point() +
+  theme_minimal() +
+  labs(x = "time (hr)", y = "population (ind)")
+
+ggplot(data = df, aes(x = time, y = log(pop))) +
+  geom_point() +
+  theme_minimal() +
+  labs(x = "time (hr)", y = "ln(population)")
+```
+
+```{r}
+df_exp <- df %>% 
+  filter(time < 15) %>% 
+  mutate(ln_pop = log(pop))
+
+lm_k <- lm(ln_pop ~ time, data = df_exp)
+lm_k
+```
+
+```{r}
+df_nls <- nls(pop ~ K/(1 + A*exp(-r*time)),
+              data = df,
+              start = list(K = 180, A = 17, r = 0.17),
+              trace = TRUE
+              )
+
+summary(df_nls)
+
+model_out <- broom::tidy(df_nls)
+
+A_est <- model_out$estimate[2]
+```
+
+```{r}
+p_predict <- predict(df_nls)
+
+df_complete <- data.frame(df, p_predict)
+
+ggplot(data = df_complete, aes(x = time, y = pop)) +
+  geom_point() +
+  geom_line(aes(x = time, y = p_predict)) +
+  theme_minimal()
+```
+
+```{r}
+df_ci <- confint2(df_nls)
+df_ci
+```
+
